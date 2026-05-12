@@ -1,5 +1,7 @@
 import type { FeedbackAnswer, ImageVariantMetadata, NextGenerationDecision } from "@/lib/feedback/types";
 
+export type { NextGenerationDecision };
+
 export type TraceMode = "root" | "wide" | "narrow" | "regenerate" | "converge" | "custom";
 
 export type TraceStatus = "idle" | "queued" | "running" | "done" | "error" | "cancelled";
@@ -119,6 +121,7 @@ export interface PlannerInput {
   nodeDepth?: number;
   outputCount?: OutputCount;
   runtimeConfig?: RuntimeConfig;
+  originatingDecision?: NextGenerationDecision;
 }
 
 export interface ImageGenerationInput {

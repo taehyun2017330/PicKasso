@@ -39,5 +39,5 @@ export async function createRealPlanTraceNode(input: PlannerInput): Promise<Plan
   });
 
   const payload = JSON.parse(response.output_text) as PromptBoardPayload;
-  return plannerOutputFromPromptBoard(payload, input, request.situation);
+  return plannerOutputFromPromptBoard(payload, input);
 }

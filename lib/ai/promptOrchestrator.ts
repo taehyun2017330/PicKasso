@@ -27,12 +27,37 @@ interface ImagePromptSituationInput {
   attempt?: number;
 }
 
+export type OrchestrationRecipe =
+  | "first_generation_board"
+  | "regenerate_all_board"
+  | "refine"
+  | "correct"
+  | "explore"
+  | "combine"
+  | "split"
+  | "edit"
+  | "revise_goal"
+  | "subsequent_exploration";
+
 const situationLabels: Record<ImagePromptSituation, string> = {
   first_generation_9: "First-round 9-image exploration",
   regenerate_generation_9: "Regenerated 9-image board",
   regenerate_single_image: "Single image regeneration",
   subsequent_exploration: "Subsequent visual exploration",
   edit: "Image edit"
+};
+
+const recipeLabels: Record<OrchestrationRecipe, string> = {
+  first_generation_board: "First-round 9-image exploration",
+  regenerate_all_board: "Regenerated 9-image board",
+  refine: "Refined variations around a liked anchor",
+  correct: "Correction of a rejected refinement",
+  explore: "Broader exploration after weak signal",
+  combine: "Merged direction from multiple references",
+  split: "Comparison paths from conflicting likes",
+  edit: "Direct edit of a reference",
+  revise_goal: "Re-baseline after revised goal",
+  subsequent_exploration: "Subsequent visual exploration"
 };
 
 export function resolvePromptOrchestrationSituation(input: Pick<
@@ -77,6 +102,27 @@ export function resolveImagePromptSituation(input: ImagePromptSituationInput): I
   return "subsequent_exploration";
 }
 
+export function resolveOrchestrationRecipe(input: PlannerInput): OrchestrationRecipe {
+  const situation = resolvePromptOrchestrationSituation(input);
+  if (situation === "first_generation_9") return "first_generation_board";
+  if (situation === "regenerate_generation_9") return "regenerate_all_board";
+
+  const mode = input.originatingDecision?.mode;
+  if (mode === "refine") return "refine";
+  if (mode === "correct") return "correct";
+  if (mode === "explore") return "explore";
+  if (mode === "combine") return "combine";
+  if (mode === "split") return "split";
+  if (mode === "edit") return "edit";
+  if (mode === "revise-goal") return "revise_goal";
+
+  if (input.actionMode === "converge") return "combine";
+  if (input.actionMode === "custom") return "edit";
+  if (input.actionMode === "narrow") return "refine";
+
+  return "subsequent_exploration";
+}
+
 export function promptBoardSchema(count: number) {
   return {
     type: "object",
@@ -104,30 +150,53 @@ export function promptBoardSchema(count: number) {
 
 export function buildPromptOrchestratorRequest(input: PlannerInput) {
   const situation = resolvePromptOrchestrationSituation(input);
+  const recipe = resolveOrchestrationRecipe(input);
   const count = input.outputCount ?? 9;
 
   return {
     situation,
+    recipe,
     count,
     system: [
       "You are a generative visual exploration director and prompt orchestrator.",
       "Return only valid JSON matching the requested schema.",
       "Each prompt must be directly usable as an image model prompt."
     ].join(" "),
-    user:
-      situation === "first_generation_9"
-        ? buildFirstGenerationPrompt(input, count)
-        : situation === "regenerate_generation_9"
-          ? buildRegenerateAllPrompt(input, count)
-        : buildContinuationPrompt(input, situation, count)
+    user: buildUserPromptForRecipe(input, recipe, count)
   };
+}
+
+function buildUserPromptForRecipe(input: PlannerInput, recipe: OrchestrationRecipe, count: number): string {
+  switch (recipe) {
+    case "first_generation_board":
+      return buildFirstGenerationPrompt(input, count);
+    case "regenerate_all_board":
+      return buildRegenerateAllPrompt(input, count);
+    case "refine":
+      return buildRefinePrompt(input, count);
+    case "correct":
+      return buildCorrectPrompt(input, count);
+    case "explore":
+      return buildExplorePrompt(input, count);
+    case "combine":
+      return buildCombinePrompt(input, count);
+    case "split":
+      return buildSplitPrompt(input, count);
+    case "edit":
+      return buildEditPrompt(input, count);
+    case "revise_goal":
+      return buildReviseGoalPrompt(input, count);
+    case "subsequent_exploration":
+    default:
+      return buildContinuationPrompt(input, "subsequent_exploration", count);
+  }
 }
 
 export function plannerOutputFromPromptBoard(
   payload: PromptBoardPayload,
-  input: PlannerInput,
-  situation: ImagePromptSituation
+  input: PlannerInput
 ): PlannerOutput {
+  const recipe = resolveOrchestrationRecipe(input);
   const count = input.outputCount ?? 9;
   const directions = payload.prompts.slice(0, count).map((item, index): PlannerDirection => {
     const name = compactText(item.name.trim() || `Image ${index + 1}`, 54);
@@ -138,14 +207,14 @@ export function plannerOutputFromPromptBoard(
       label: name,
       prompt,
       description,
-      why: `${situationLabels[situation]} prompt ${index + 1}.`,
-      divergence: divergenceForSituation(situation, index)
+      why: `${recipeLabels[recipe]} prompt ${index + 1}.`,
+      divergence: divergenceForRecipe(recipe, index, count)
     };
   });
 
   return {
-    nodeTitle: nodeTitleForSituation(situation),
-    strategy: `${situationLabels[situation]} selected by the prompt orchestrator.`,
+    nodeTitle: nodeTitleForRecipe(recipe),
+    strategy: `${recipeLabels[recipe]} selected by the prompt orchestrator.`,
     traceSummary: buildTraceSummary(input),
     directions
   };
@@ -254,19 +323,7 @@ function buildRegenerateAllPrompt(input: PlannerInput, count: number) {
   const targetAudience = brand?.targetAudience || "unspecified audience";
   const goal = brand?.goal || "visual exploration";
   const feedback = compactText(input.userPrompt || "The user wants the full board regenerated.", 900);
-  const boardSnapshot = input.selectedVariants
-    .slice(0, 9)
-    .map((variant, index) =>
-      [
-        `${index + 1}. ${variant.styleLabel || `Image ${index + 1}`}`,
-        `Prompt: ${compactText(variant.prompt, 220)}`,
-        variant.feedback?.rating ? `Signal: ${variant.feedback.rating}` : null,
-        variant.feedback?.reasonChips.length ? `Reasons: ${variant.feedback.reasonChips.join(", ")}` : null,
-        variant.feedback?.note ? `Note: ${compactText(variant.feedback.note, 140)}` : null
-      ]
-        .filter(Boolean)
-        .join(" | ")
-    );
+  const boardSnapshot = formatBoardSnapshot(input.selectedVariants, 9);
 
   return [
     "You are a generative visual exploration director and prompt orchestrator.",
@@ -287,7 +344,7 @@ function buildRegenerateAllPrompt(input: PlannerInput, count: number) {
     feedback,
     "",
     "CURRENT 3x3 BOARD SNAPSHOT",
-    boardSnapshot.length ? boardSnapshot.join("\n") : "No completed board snapshot was provided.",
+    boardSnapshot || "No completed board snapshot was provided.",
     "",
     "OBJECTIVE",
     "Create a replacement 9-image exploration board for the same brand.",
@@ -369,29 +426,593 @@ function buildRegenerateAllPrompt(input: PlannerInput, count: number) {
   ].join("\n");
 }
 
+function buildRefinePrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const intent = compactText(intentFromInput(input), 600);
+  const anchor = pickAnchorVariant(input.selectedVariants);
+  const anchorBlock = anchor ? formatAnchor(anchor) : "No anchor variant was provided. Use the warm signals below as the closest substitute.";
+  const warm = formatSignals(input.traceMemory.warmSignals, "warm");
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} refined image prompts centered on a direction the user already liked.`,
+    "",
+    "This is not a fresh exploration sweep.",
+    "This is not a regeneration of the whole board.",
+    "This is a focused set of sibling variations around a liked anchor, with weaker traits removed.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "USER INTENT",
+    intent,
+    "",
+    "LIKED ANCHOR",
+    anchorBlock,
+    "",
+    "WARM TRAITS TO PRESERVE",
+    warm,
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompts that:`,
+    "- Stay close to the anchor's visual core (medium, palette, mood, composition system, subject role).",
+    "- Vary in non-core dimensions: specific subject moment, framing, time of day, micro-styling, supporting detail.",
+    "- Amplify the warm traits where it makes sense, not just maintain them.",
+    "- Remove any cold traits that have been recurring.",
+    "- Do not drift into a different aesthetic family.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. Identify the anchor's visual core. What makes it readable as this direction and not another one?",
+    "2. Separate core dimensions (preserve exactly) from peripheral dimensions (vary deliberately).",
+    "3. Pick peripheral choices that feel like meaningful options, not random noise around the anchor.",
+    "4. Sanity-check that the warm signals are being amplified, not flattened.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "Each prompt should read as a sibling of the anchor, not a different direction.",
+    "Do not make the prompts feel like the same image with one tweaked word.",
+    "If the anchor has no readable text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} objects.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "\"description\" should be one short natural-language sentence describing what was preserved from the anchor and what was varied.",
+    "",
+    "Before returning, do one final check:",
+    "If your prompts could fit on the anchor's moodboard and each adds one genuinely different choice, you are done.",
+    "If they feel like noise around the anchor or have drifted into new territory, revise them."
+  ].join("\n");
+}
+
+function buildCorrectPrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const intent = compactText(intentFromInput(input), 600);
+  const rejected = input.selectedVariants[0];
+  const rejectedBlock = rejected ? formatAnchor(rejected) : "No specific rejected variant was provided.";
+  const warm = formatSignals(input.traceMemory.warmSignals, "warm");
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} corrected image prompts after a refined image was rejected.`,
+    "",
+    "The prior turn produced a single refined image. The user rejected that refinement.",
+    "Earlier in the trace, there was a warm direction the user did like. The correction must restore that warm signal and fix the specific things that went wrong in the refinement.",
+    "",
+    "This is not a fresh exploration sweep.",
+    "This is not a broad regeneration.",
+    "This is a targeted recovery toward the prior warm direction.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "USER INTENT",
+    intent,
+    "",
+    "REJECTED REFINEMENT",
+    rejectedBlock,
+    "",
+    "PRIOR WARM SIGNAL TO RESTORE",
+    warm,
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompts that:`,
+    "- Re-anchor on the prior warm signal, treating it as the direction to return to.",
+    "- Diagnose what went wrong in the rejected refinement and avoid repeating it.",
+    "- Do not over-correct into a different aesthetic family.",
+    "- Stay tighter than a refine set: these are recovery attempts, not exploration.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. Identify what made the rejected refinement break the warm signal. Look for changes in subject framing, palette shift, mood drift, composition, or text.",
+    "2. Identify the load-bearing traits of the warm signal that must be present in every corrected prompt.",
+    "3. Plan a small set of distinct correction attempts. Each should address the failure in a different way.",
+    "4. Do not collapse all attempts into the safest possible image.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "If the prior warm direction had no readable text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} objects.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "\"description\" should be one short sentence stating what specifically is being corrected and what is being preserved from the prior warm direction.",
+    "",
+    "Before returning, do one final check:",
+    "If every prompt would reproduce the rejected refinement's failure, revise.",
+    "If every prompt has abandoned the prior warm direction, revise."
+  ].join("\n");
+}
+
+function buildExplorePrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const intent = compactText(intentFromInput(input), 600);
+  const rejectedSnapshot = formatBoardSnapshot(input.selectedVariants, 9);
+  const warm = formatSignals(input.traceMemory.warmSignals, "warm");
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+  const ancestry = input.traceMemory.ancestrySummary || "No prior ancestry.";
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} broader image prompts after the prior set did not produce a strong signal.`,
+    "",
+    "The user is not asking for refinement. They are signaling that the search needs to widen.",
+    "",
+    "This is not a first-round board (the brand context already has trace history).",
+    "This is not a full regeneration of a rejected board.",
+    "This is a deliberate widening of the search direction, informed by what has been ruled out so far.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "USER INTENT",
+    intent,
+    "",
+    "ANCESTRY",
+    ancestry,
+    "",
+    "PRIOR BOARD SNAPSHOT (rule-out signal, not a template)",
+    rejectedSnapshot || "No prior board snapshot was provided.",
+    "",
+    "WARM TRAITS (faint but real, keep available)",
+    warm,
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompts that:`,
+    "- Widen the visual search beyond what the prior board explored.",
+    "- Move away from the cold traits without collapsing into a single safer aesthetic.",
+    "- Keep faint warm traits available where useful, without forcing them everywhere.",
+    "- Sample territories the prior set did not touch.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. List the dimensions the prior board over-sampled (medium, palette, mood, composition, subject role).",
+    "2. List adjacent territories that have not yet been tested.",
+    "3. Pick a wide set of distinct territories for the new prompts.",
+    "4. Confirm each territory genuinely differs from the prior set, not just superficially.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "DESIGN SPACE",
+    `Across the ${count} prompts, create meaningful contrast in:`,
+    "- visual medium or art style",
+    "- color palette",
+    "- communication style",
+    "- composition system",
+    "- emotional tone",
+    "- role of product, people, place, story, or atmosphere",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "Do not reuse the same visual form pattern across the prompts.",
+    "If the image should not contain text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} objects.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "\"description\" should be one short sentence naming the new territory and how it differs from the prior set.",
+    "",
+    "Before returning, do one final check:",
+    "If your prompts substantially overlap with the prior board, revise them.",
+    "If they have ignored what the user already ruled out, revise them."
+  ].join("\n");
+}
+
+function buildCombinePrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const intent = compactText(intentFromInput(input), 600);
+  const referenceBlock = formatBoardSnapshot(input.selectedVariants, 9);
+  const warm = formatSignals(input.traceMemory.warmSignals, "warm");
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} merged image prompts that combine the useful parts of multiple liked references.`,
+    "",
+    "Each reference contributed something the user liked. Your job is to identify what each reference contributes, then write prompts that blend those contributions in different ways.",
+    "",
+    "This is not a fresh exploration sweep.",
+    "This is not a single-direction refinement.",
+    "This is a structured merge: each prompt should feel like it inherits from the references rather than replacing them.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "USER INTENT",
+    intent,
+    "",
+    "REFERENCES TO COMBINE",
+    referenceBlock || "No references were provided.",
+    "",
+    "WARM TRAITS TO PRESERVE",
+    warm,
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompts that:`,
+    "- Identify the single strongest contribution from each reference (subject, composition, palette, mood, medium, or aesthetic detail).",
+    "- Blend those contributions in different proportions across the prompts.",
+    "- Do not produce N copies of the same blend.",
+    "- Do not pick one reference and ignore the others.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. For each reference, name its strongest contribution in one phrase. Treat that contribution as a building block.",
+    "2. Plan how to combine the building blocks. Possible blends include foreground/background pairing, structural inheritance from one and surface treatment from another, or staged compositions that quote each reference.",
+    "3. Make sure at least one prompt heavily favors each reference, and at least one prompt mixes more than two.",
+    "4. Confirm no prompt is a flat average of all references.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "If the references have no readable text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} objects.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "\"description\" should be one short sentence stating which references are being combined and how.",
+    "",
+    "Before returning, do one final check:",
+    "If your prompts all read as the same blend, revise them.",
+    "If any reference's contribution is missing entirely, revise."
+  ].join("\n");
+}
+
+function buildSplitPrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const intent = compactText(intentFromInput(input), 600);
+  const referenceBlock = formatBoardSnapshot(input.selectedVariants, 9);
+  const warm = formatSignals(input.traceMemory.warmSignals, "warm");
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+  const pathA = Math.ceil(count / 2);
+  const pathB = count - pathA;
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} image prompts that resolve conflicting liked directions by exploring both as parallel paths.`,
+    "",
+    "The user liked multiple variants that point in incompatible directions. Instead of merging them, your job is to give each direction its own focused continuation set, so the user can compare side by side.",
+    "",
+    "This is not a merge.",
+    "This is not a refinement around one anchor.",
+    "This is two anchored sub-explorations, kept visually parallel in structure but distinct in direction.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "USER INTENT",
+    intent,
+    "",
+    "CONFLICTING LIKED REFERENCES",
+    referenceBlock || "No references were provided.",
+    "",
+    "WARM TRAITS TO PRESERVE",
+    warm,
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompts organized as two parallel paths:`,
+    `- Path A: ${pathA} prompts anchored on the first liked direction. Each stays close to its anchor and varies in non-core dimensions.`,
+    `- Path B: ${pathB} prompts anchored on the second liked direction. Each stays close to its anchor and varies in non-core dimensions.`,
+    "- The two paths must remain visually distinct. Do not blend them.",
+    "- Within each path, the prompts should feel like siblings rather than duplicates.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. Name the visual core of each anchor in one phrase.",
+    "2. Confirm the two cores are genuinely different (not just surface variation).",
+    "3. Plan peripheral variations for each path independently.",
+    "4. Order the output so Path A and Path B are clearly grouped.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "If the anchor has no readable text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} objects.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "Order the prompts so that the first set belongs to Path A and the rest to Path B.",
+    "\"description\" should be one short sentence naming which path the prompt belongs to and what is being varied within that path.",
+    "",
+    "Before returning, do one final check:",
+    "If Path A and Path B are no longer visually distinct, revise.",
+    "If any path collapses into one repeated image, revise."
+  ].join("\n");
+}
+
+function buildEditPrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const instruction = compactText(intentFromInput(input), 600);
+  const reference = pickAnchorVariant(input.selectedVariants);
+  const referenceBlock = reference ? formatAnchor(reference) : "No reference image was provided.";
+  const warm = formatSignals(input.traceMemory.warmSignals, "warm");
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} image prompts that apply a direct user edit to a reference image.`,
+    "",
+    "The user has issued a specific instruction. The edit is the controlling intent. Everything else about the reference must be preserved unless the instruction directly contradicts it.",
+    "",
+    "This is not exploration.",
+    "This is not refinement.",
+    "This is a tight transformation: apply the instruction, preserve the rest.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "EDIT INSTRUCTION",
+    instruction,
+    "",
+    "REFERENCE TO EDIT",
+    referenceBlock,
+    "",
+    "WARM TRAITS TO PRESERVE",
+    warm,
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompts that:`,
+    "- Apply the edit instruction precisely.",
+    "- Preserve everything else about the reference that the instruction does not directly contradict.",
+    "- Vary only in how the edit is interpreted or rendered, not in the underlying direction.",
+    "- Do not drift into a different aesthetic or subject.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. Decompose the instruction. What exactly is being changed? What is implied to stay the same?",
+    "2. Identify the reference's load-bearing traits (medium, palette, composition, subject, mood). Keep them.",
+    "3. Plan a small set of interpretations of the instruction that genuinely differ in approach, not in topic.",
+    "4. Confirm no interpretation contradicts the user's instruction.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "If the reference has no readable text and the instruction does not request text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} objects.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "\"description\" should be one short sentence stating how the instruction is being applied while preserving the rest of the reference.",
+    "",
+    "Before returning, do one final check:",
+    "If any prompt ignores or contradicts the instruction, revise.",
+    "If any prompt drifts away from the reference's load-bearing traits, revise."
+  ].join("\n");
+}
+
+function buildReviseGoalPrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const intent = compactText(intentFromInput(input), 600);
+  const rejectedSnapshot = formatBoardSnapshot(input.selectedVariants, 9);
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+  const ancestry = input.traceMemory.ancestrySummary || "No prior ancestry.";
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} image prompts that re-baseline the exploration around a revised goal.`,
+    "",
+    "The user has signaled that prior attempts were missing the brief, not just the execution. The goal or audience has been revised. Treat this as a near-fresh exploration, but informed by what was clearly wrong before.",
+    "",
+    "This is not a small correction.",
+    "This is not a refinement.",
+    "This is a re-baseline: the search starts close to first-round breadth, with the prior cold traits ruled out.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "REVISED INTENT FROM USER",
+    intent,
+    "",
+    "ANCESTRY (what has been tried)",
+    ancestry,
+    "",
+    "PRIOR BOARD SNAPSHOT (rule-out signal)",
+    rejectedSnapshot || "No prior board snapshot was provided.",
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompts that:`,
+    "- Treat the revised goal and audience as the new ground truth.",
+    "- Match first-round diversity standards: meaningful contrast in medium, palette, composition, mood, subject role.",
+    "- Avoid the prior cold traits without collapsing into a single safer aesthetic.",
+    "- Do not reuse the prior board's directions even superficially.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. Restate the revised goal in your own words to confirm understanding.",
+    "2. Identify what the prior board was solving for that no longer applies.",
+    "3. Map a wide territory under the revised goal. Include obvious, social-friendly, editorial, product-led, atmospheric, and unexpected directions when relevant.",
+    "4. Pick prompts with high visual distance from each other.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "DESIGN SPACE",
+    `Across the ${count} prompts, create meaningful contrast in:`,
+    "- visual medium or art style",
+    "- color palette",
+    "- communication style",
+    "- composition system",
+    "- emotional tone",
+    "- role of product, people, place, story, or atmosphere",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "If the image should not contain text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} objects.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "\"description\" should be one short sentence naming the territory and how it serves the revised goal.",
+    "",
+    "Before returning, do one final check:",
+    "If the prompts still echo the prior board, revise them.",
+    "If the prompts ignore the revised goal, revise them."
+  ].join("\n");
+}
+
 function buildContinuationPrompt(
   input: PlannerInput,
   situation: ImagePromptSituation,
   count: number
 ) {
   const brand = input.brand;
-  const references = input.selectedVariants
-    .slice(0, 6)
-    .map((variant, index) =>
-      [
-        `${index + 1}. ${variant.styleLabel}`,
-        `Prompt: ${compactText(variant.prompt, 220)}`,
-        variant.feedback?.rating ? `Signal: ${variant.feedback.rating}` : null,
-        variant.feedback?.reasonChips.length ? `Reasons: ${variant.feedback.reasonChips.join(", ")}` : null,
-        variant.feedback?.note ? `Note: ${compactText(variant.feedback.note, 140)}` : null
-      ]
-        .filter(Boolean)
-        .join(" | ")
-    );
+  const references = formatBoardSnapshot(input.selectedVariants, 6);
 
   return [
     `Situation: ${situationLabels[situation]}.`,
-    "This prompt recipe is a placeholder until a dedicated situation prompt is written.",
     "Use the trace context to create compact, image-model-ready prompts without collapsing every option into the same look.",
     "",
     "Brand brief:",
@@ -406,8 +1027,8 @@ function buildContinuationPrompt(
     "Trace memory:",
     buildTraceSummary(input),
     "",
-    references.length ? "Selected references:" : "Selected references: none.",
-    references.join("\n"),
+    references ? "Selected references:" : "Selected references: none.",
+    references,
     "",
     "Write compact image prompts in this structure:",
     "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
@@ -448,20 +1069,107 @@ function buildTraceSummary(input: PlannerInput) {
   ].join(" ");
 }
 
-function nodeTitleForSituation(situation: ImagePromptSituation) {
-  if (situation === "first_generation_9") return "First Directions";
-  if (situation === "regenerate_generation_9") return "Regenerated Set";
-  if (situation === "regenerate_single_image") return "Regenerated Image";
-  if (situation === "edit") return "Custom Steer";
-  return "Next Directions";
+function intentFromInput(input: PlannerInput) {
+  const decisionIntent = input.originatingDecision?.promptIntent?.trim();
+  const userPrompt = input.userPrompt?.trim();
+  if (decisionIntent && userPrompt && decisionIntent !== userPrompt) {
+    return `${decisionIntent} ${userPrompt}`;
+  }
+  return decisionIntent || userPrompt || "Continue the visual exploration based on the available signals.";
 }
 
-function divergenceForSituation(
-  situation: ImagePromptSituation,
-  index: number
+function pickAnchorVariant(variants: PlannerInput["selectedVariants"]) {
+  const liked = variants.find((variant) => variant.feedback?.rating === "like");
+  return liked ?? variants[0];
+}
+
+function formatAnchor(variant: PlannerInput["selectedVariants"][number]) {
+  return [
+    `Label: ${variant.styleLabel || "Anchor"}`,
+    `Prompt: ${compactText(variant.prompt, 280)}`,
+    variant.feedback?.rating ? `Signal: ${variant.feedback.rating}` : null,
+    variant.feedback?.reasonChips?.length ? `Reasons: ${variant.feedback.reasonChips.join(", ")}` : null,
+    variant.feedback?.note ? `Note: ${compactText(variant.feedback.note, 180)}` : null
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function formatBoardSnapshot(variants: PlannerInput["selectedVariants"], limit: number) {
+  if (!variants.length) return "";
+  return variants
+    .slice(0, limit)
+    .map((variant, index) =>
+      [
+        `${index + 1}. ${variant.styleLabel || `Image ${index + 1}`}`,
+        `Prompt: ${compactText(variant.prompt, 220)}`,
+        variant.feedback?.rating ? `Signal: ${variant.feedback.rating}` : null,
+        variant.feedback?.reasonChips?.length ? `Reasons: ${variant.feedback.reasonChips.join(", ")}` : null,
+        variant.feedback?.note ? `Note: ${compactText(variant.feedback.note, 140)}` : null
+      ]
+        .filter(Boolean)
+        .join(" | ")
+    )
+    .join("\n");
+}
+
+function formatSignals(signals: string[], kind: "warm" | "cold") {
+  if (!signals.length) return kind === "warm" ? "No warm signals yet." : "No cold signals yet.";
+  return signals.slice(-6).map((signal, index) => `${index + 1}. ${signal}`).join("\n");
+}
+
+function nodeTitleForRecipe(recipe: OrchestrationRecipe) {
+  switch (recipe) {
+    case "first_generation_board":
+      return "First Directions";
+    case "regenerate_all_board":
+      return "Regenerated Set";
+    case "refine":
+      return "Refined Variations";
+    case "correct":
+      return "Corrected Direction";
+    case "explore":
+      return "Broader Exploration";
+    case "combine":
+      return "Combined Direction";
+    case "split":
+      return "Parallel Paths";
+    case "edit":
+      return "Custom Steer";
+    case "revise_goal":
+      return "Re-Baselined Directions";
+    case "subsequent_exploration":
+    default:
+      return "Next Directions";
+  }
+}
+
+function divergenceForRecipe(
+  recipe: OrchestrationRecipe,
+  index: number,
+  count: number
 ): PlannerDirection["divergence"] {
-  if (situation === "first_generation_9") return index < 6 ? "wide" : "medium";
-  if (situation === "regenerate_generation_9") return index < 5 ? "wide" : "medium";
-  if (situation === "regenerate_single_image" || situation === "edit") return "narrow";
-  return index === 0 ? "narrow" : "medium";
+  switch (recipe) {
+    case "first_generation_board":
+      return index < 6 ? "wide" : "medium";
+    case "regenerate_all_board":
+      return index < 5 ? "wide" : "medium";
+    case "explore":
+    case "revise_goal":
+      return index < Math.ceil(count * 0.6) ? "wide" : "medium";
+    case "refine":
+      return index < Math.ceil(count / 2) ? "narrow" : "medium";
+    case "correct":
+    case "edit":
+      return "narrow";
+    case "combine":
+      return index < 2 ? "medium" : "narrow";
+    case "split": {
+      const pathA = Math.ceil(count / 2);
+      return index < pathA ? "narrow" : "narrow";
+    }
+    case "subsequent_exploration":
+    default:
+      return index === 0 ? "narrow" : "medium";
+  }
 }

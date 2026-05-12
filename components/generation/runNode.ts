@@ -1,6 +1,6 @@
 import { summarizeTraceMemory } from "@/lib/ai/traceMemory";
 import { resolveImagePromptSituation } from "@/lib/ai/promptOrchestrator";
-import type { ImageVariant, RuntimeConfig } from "@/lib/types";
+import type { ImageVariant, NextGenerationDecision, RuntimeConfig } from "@/lib/types";
 import { compactText, findVariant } from "@/lib/utils";
 import { runVariant } from "@/components/generation/runVariant";
 import { ensureTask, cancelHandles, isNodeStopped } from "@/components/generation/taskRegistry";
@@ -44,6 +44,9 @@ export async function runNode(
         nodes: threadNodes,
         selectedVariants: planningVariants
       });
+      const originatingDecision = node.parentNodeIds
+        .map((parentId) => state.nodes[parentId]?.decision)
+        .find((decision): decision is NextGenerationDecision => Boolean(decision));
 
       const response = await fetch("/api/trace/plan", {
         method: "POST",
@@ -57,7 +60,8 @@ export async function runNode(
           seed: `${node.id}:${node.attempt}`,
           nodeDepth: node.depth,
           outputCount: node.outputCount ?? 4,
-          runtimeConfig: config
+          runtimeConfig: config,
+          originatingDecision
         })
       });
 
