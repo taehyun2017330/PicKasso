@@ -38,7 +38,7 @@ export function ImageBoard({
   });
 
   return (
-    <div className={cn("relative", fitToViewport && "trace-board-frame grid h-full min-h-0 w-full place-items-center overflow-visible")}>
+    <div className={cn("relative", fitToViewport && "trace-board-frame grid h-full min-h-0 w-full items-start justify-items-center overflow-visible")}>
       <div
         className={cn(
           "grid gap-[6px] bg-white",
