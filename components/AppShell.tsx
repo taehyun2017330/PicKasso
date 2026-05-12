@@ -104,6 +104,7 @@ export function AppShell() {
     [commands]
   );
   const useSimulatedBakeryPreset = useCallback(() => {
+    resetConfig();
     setSimulatedBakeryPreset(true);
     setGalleryOpen(false);
     setPickerOpen(false);
@@ -111,7 +112,7 @@ export function AppShell() {
     setActiveBrandId(null);
     actions.setActiveThread(null);
     actions.addToast("Bakery demo preset loaded");
-  }, [actions]);
+  }, [actions, resetConfig]);
   const createBrandFromWizard = useCallback(
     (input: BrandInput) => {
       const brand = commands.createBrand(input);

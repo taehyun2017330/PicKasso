@@ -9,7 +9,7 @@ const fallbackConfig: RuntimeConfig = {
   mockLatencyMs: 3000
 };
 
-const overrideKey = "brand-image-trace-runtime-config";
+const overrideKey = "brand-image-trace-runtime-config-v2";
 
 type RuntimeConfigPatch = Partial<
   Pick<RuntimeConfig, "realMode">

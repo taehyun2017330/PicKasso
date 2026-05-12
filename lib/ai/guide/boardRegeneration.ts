@@ -14,14 +14,14 @@ export interface BoardRegenerationReview {
 }
 
 const defaultReasons = [
-  "too similar",
-  "weak subject",
-  "off brand",
-  "wrong mood",
-  "too busy",
-  "not useful enough",
-  "needs clearer product focus",
-  "wrong audience"
+  "repeated visual formula",
+  "weak main subject",
+  "unclear brand fit",
+  "wrong emotional tone",
+  "busy composition",
+  "not enough usable range",
+  "unclear product role",
+  "weak audience signal"
 ];
 
 export function analyzeBoardRegeneration(input: {
@@ -34,11 +34,11 @@ export function analyzeBoardRegeneration(input: {
   const lower = prompts.toLowerCase();
   const detected = new Set<string>();
 
-  addIfRepeated(detected, lower, ["minimal", "clean", "quiet", "neutral"], "too quiet");
-  addIfRepeated(detected, lower, ["poster", "headline", "text", "typography"], "too much text");
-  addIfRepeated(detected, lower, ["product", "packaging", "still life"], "too product-led");
-  addIfRepeated(detected, lower, ["photo", "photoreal", "realistic"], "not enough visual range");
-  addIfRepeated(detected, lower, ["warm", "soft", "calm"], "too soft");
+  addIfRepeated(detected, lower, ["minimal", "clean", "quiet", "neutral"], "too many quiet neutrals");
+  addIfRepeated(detected, lower, ["poster", "headline", "text", "typography"], "too many text-led layouts");
+  addIfRepeated(detected, lower, ["product", "packaging", "still life"], "too many product still lifes");
+  addIfRepeated(detected, lower, ["photo", "photoreal", "realistic"], "not enough medium range");
+  addIfRepeated(detected, lower, ["warm", "soft", "calm"], "too much soft warmth");
 
   const options = [...detected, ...defaultReasons]
     .filter((value, index, values) => values.indexOf(value) === index)

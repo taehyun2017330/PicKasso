@@ -1,4 +1,5 @@
 import type { Brand, ImagePromptSituation, PlannerOutput } from "@/lib/types";
+import { hashString } from "@/lib/utils";
 
 export const customBakeryBrand = {
   name: "Crumb & Comet Bakehouse",
@@ -55,7 +56,7 @@ export const customBakeryDirections = [
   }
 ];
 
-const customBakeryLatencies = [20000, 24000, 26000, 28000, 21000, 25000, 27000, 23000, 29000];
+const customBakeryLatencySlots = [11000, 16500, 24000, 31500, 37000, 45500, 52000, 61000, 69000];
 
 function normalize(value: string) {
   return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, " ").trim();
@@ -93,6 +94,7 @@ export function customBakeryVariantFor(input: {
   brand: Brand | null | undefined;
   promptSituation?: ImagePromptSituation;
   index: number;
+  seed?: string;
 }) {
   if (!shouldUseCustomBakeryFirstBoard(input)) return null;
   const direction = customBakeryDirections[input.index];
@@ -102,8 +104,18 @@ export function customBakeryVariantFor(input: {
     src: `/custom/${input.index + 1}.png`,
     prompt: direction.prompt_for_image_model,
     styleLabel: direction.name,
-    latencyMs: customBakeryLatencies[input.index] ?? 24000
+    latencyMs: customBakeryLatencyFor(input.index, input.seed ?? customBakeryBrand.name)
   };
+}
+
+function customBakeryLatencyFor(index: number, seed: string) {
+  const order = customBakeryDirections
+    .map((_, variantIndex) => variantIndex)
+    .sort((left, right) => hashString(`${seed}:bakery-order:${left}`) - hashString(`${seed}:bakery-order:${right}`));
+  const slotIndex = Math.max(0, order.indexOf(index));
+  const jitter = (hashString(`${seed}:bakery-jitter:${index}`) % 3200) - 1400;
+
+  return Math.max(7000, (customBakeryLatencySlots[slotIndex] ?? 24000) + jitter);
 }
 
 function customBakeryDescription(name: string) {

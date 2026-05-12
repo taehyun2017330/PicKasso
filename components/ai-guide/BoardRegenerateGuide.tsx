@@ -50,6 +50,7 @@ export function BoardRegenerateGuide({
   const selectedLabels = labelsFor(review.options, selectedIds);
   const noteText = note.trim();
   const canGenerate = selectedIds.length > 0 || noteText.length > 0;
+  const isReviewLoading = reviewStatus === "loading";
 
   useEffect(() => {
     let alive = true;
@@ -157,57 +158,94 @@ export function BoardRegenerateGuide({
         ) : null}
       </div>
 
-      <p className="mt-4 text-[15px] font-semibold leading-6">What is wrong with this board?</p>
-      <p className="mt-2 text-sm leading-6 text-white/66">
-        {reviewStatus === "loading" ? "I’m reviewing the full 3x3 board before suggesting what to avoid." : review.summary}
-      </p>
+      {isReviewLoading ? (
+        <RegenerateReviewLoading />
+      ) : (
+        <>
+          <p className="mt-4 text-[15px] font-semibold leading-6">What would you change about this board?</p>
+          <p className="mt-1 text-sm leading-5 text-white/58">Pick what you agree with, or add your own critique.</p>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {review.options.map((option) => {
-          const selected = selectedIds.includes(option.id);
+          <div className="mt-4">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-white/45">My critique</p>
+            <div className="flex flex-wrap gap-1.5">
+              {review.options.map((option) => {
+                const selected = selectedIds.includes(option.id);
 
-          return (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setSelectedIds((current) => toggleOption(current, option.id, 4))}
-              className={cn(
-                "min-h-8 rounded-full border px-3 text-[12px] font-semibold leading-4 transition",
-                selected
-                  ? "border-white bg-white text-[#151515]"
-                  : "border-white/14 bg-white/[0.06] text-white/74 hover:border-white/32 hover:bg-white/[0.1] hover:text-white"
-              )}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setSelectedIds((current) => toggleOption(current, option.id, 4))}
+                    className={cn(
+                      "min-h-8 rounded-full border px-3 text-[12px] font-semibold leading-4 transition",
+                      selected
+                        ? "border-white bg-white text-[#151515]"
+                        : "border-white/14 bg-white/[0.06] text-white/74 hover:border-white/32 hover:bg-white/[0.1] hover:text-white"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-      <textarea
-        value={note}
-        onChange={(event) => setNote(event.target.value)}
-        placeholder="Or type what missed..."
-        className="mt-3 h-20 w-full resize-none rounded-lg border border-white/12 bg-white/[0.06] px-3 py-2 text-sm leading-5 text-white outline-none transition placeholder:text-white/35 focus:border-white/36 focus:bg-white/[0.08]"
-        maxLength={260}
-      />
+          <textarea
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="Or type what missed..."
+            className="mt-3 h-20 w-full resize-none rounded-lg border border-white/12 bg-white/[0.06] px-3 py-2 text-sm leading-5 text-white outline-none transition placeholder:text-white/35 focus:border-white/36 focus:bg-white/[0.08]"
+            maxLength={260}
+          />
 
-      <p className="mt-2 text-[12px] leading-5 text-white/58">
-        I’ll regenerate all nine with the same exploration range, but away from the reasons you mark here.
-      </p>
+          <div className="mt-4 border-t border-white/10 pt-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-white/45">PicKasso&apos;s critique</p>
+            <p className="mt-2 text-sm leading-6 text-white/70">{review.summary}</p>
+          </div>
 
-      <button
-        type="button"
-        onClick={submit}
-        disabled={!canGenerate || isSubmitting || reviewStatus === "loading"}
-        className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-[#151515] transition hover:bg-[#f0f0ed] disabled:cursor-not-allowed disabled:bg-white/22 disabled:text-white/45"
-      >
-        {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
-        Regenerate 9 images
-        {!isSubmitting ? <ArrowRight size={14} /> : null}
-      </button>
+          <p className="mt-2 text-[12px] leading-5 text-white/58">
+            I’ll regenerate all nine with the same exploration range, but away from the reasons you mark here.
+          </p>
+
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canGenerate || isSubmitting}
+            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-[#151515] transition hover:bg-[#f0f0ed] disabled:cursor-not-allowed disabled:bg-white/22 disabled:text-white/45"
+          >
+            {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : null}
+            Regenerate 9 images
+            {!isSubmitting ? <ArrowRight size={14} /> : null}
+          </button>
+        </>
+      )}
     </div>
   );
+}
+
+function RegenerateReviewLoading() {
+  return (
+    <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.05] p-4">
+      <div className="flex items-center gap-3">
+        <span className="grid h-8 w-8 place-items-center rounded-full bg-white/10">
+          <Loader2 size={15} className="animate-spin text-white/72" />
+        </span>
+        <div>
+          <p className="text-[15px] font-semibold leading-5">Reviewing this board</p>
+          <p className="mt-1 text-sm leading-5 text-white/55">PicKasso is reading the full 3x3 set before suggesting changes.</p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2">
+        <LoadingLine className="w-[92%]" />
+        <LoadingLine className="w-[78%]" />
+        <LoadingLine className="w-[64%]" />
+      </div>
+    </div>
+  );
+}
+
+function LoadingLine({ className }: { className?: string }) {
+  return <span className={cn("block h-2 rounded-full bg-white/10", className)} />;
 }
 
 function toReviewVariant(variant: TraceNode["variants"][number]): BoardRegenerationVariant {

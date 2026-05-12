@@ -39,7 +39,7 @@ export function runVariant({
   config,
   task
 }: RunVariantInput) {
-  const customBakeryVariant = customBakeryVariantFor({ brand, promptSituation, index });
+  const customBakeryVariant = customBakeryVariantFor({ brand, promptSituation, index, seed: `${nodeId}:${attempt}` });
   if (customBakeryVariant) {
     runCustomBakeryVariant({
       nodeId,

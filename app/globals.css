@@ -56,22 +56,32 @@ button {
 }
 
 .trace-board-frame,
-.trace-card-frame {
+.trace-card-frame,
+.trace-card-stage {
   container-type: size;
 }
 
-.trace-image-board-grid,
-.trace-card-square {
+.trace-image-board-grid {
   aspect-ratio: 1 / 1;
   width: min(100%, 100vh);
   max-height: 100%;
   max-width: 100%;
 }
 
+.trace-card-square {
+  aspect-ratio: 1 / 1;
+  width: min(100%, calc(100vh - 9.5rem));
+  max-height: 100%;
+  max-width: 100%;
+}
+
 @supports (width: 1cqw) {
-  .trace-image-board-grid,
-  .trace-card-square {
+  .trace-image-board-grid {
     width: min(100cqw, 100cqh);
+  }
+
+  .trace-card-square {
+    width: min(100cqw, calc(100cqh - 9.5rem));
   }
 }
 

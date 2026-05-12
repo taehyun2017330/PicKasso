@@ -3,6 +3,8 @@ import "server-only";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 
+import sharp from "sharp";
+
 import { createOpenAIClient } from "@/lib/ai/openAiClient";
 import { getOpenAIGuideTimeoutMs } from "@/lib/ai/openAiSettings";
 import {
@@ -39,7 +41,7 @@ const boardRegenerationSchema = {
 };
 
 function supportsDataVisionInput(src: string) {
-  return /^data:image\/(png|jpe?g|webp|gif);/i.test(src);
+  return /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(src);
 }
 
 function mimeForPath(src: string) {
@@ -51,7 +53,13 @@ function mimeForPath(src: string) {
   return null;
 }
 
-async function publicAssetDataUrl(src: string) {
+function dataUrlBuffer(src: string) {
+  const match = src.match(/^data:image\/(?:png|jpe?g|webp|gif);base64,(.+)$/i);
+  if (!match?.[1]) return null;
+  return Buffer.from(match[1], "base64");
+}
+
+async function publicAssetBuffer(src: string) {
   if (!src.startsWith("/")) return null;
 
   let pathname = "";
@@ -70,31 +78,78 @@ async function publicAssetDataUrl(src: string) {
   if (filePath !== publicRoot && !filePath.startsWith(`${publicRoot}/`)) return null;
 
   try {
-    const bytes = await readFile(filePath);
-    return `data:${mime};base64,${bytes.toString("base64")}`;
+    return await readFile(filePath);
   } catch {
     return null;
   }
 }
 
+async function thumbnailDataUrl(buffer: Buffer) {
+  const output = await sharp(buffer, { failOn: "none" })
+    .resize(512, 512, {
+      fit: "inside",
+      withoutEnlargement: true
+    })
+    .jpeg({
+      quality: 68,
+      mozjpeg: true
+    })
+    .toBuffer();
+
+  return `data:image/jpeg;base64,${output.toString("base64")}`;
+}
+
 async function visionInputSource(src: string) {
-  if (supportsDataVisionInput(src)) return src;
-  return publicAssetDataUrl(src);
+  const sourceBuffer = supportsDataVisionInput(src) ? dataUrlBuffer(src) : await publicAssetBuffer(src);
+  if (!sourceBuffer) return null;
+
+  try {
+    return await thumbnailDataUrl(sourceBuffer);
+  } catch {
+    return null;
+  }
 }
 
 function compact(value: unknown, fallback: string, maxLength = 260) {
   const text = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
-  return (text || fallback).slice(0, maxLength);
+  const source = text || fallback;
+  if (source.length <= maxLength) return source;
+  return `${source.slice(0, Math.max(0, maxLength - 1)).replace(/\s+\S*$/, "").trim()}...`;
 }
 
 function optionId(label: string) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "reason";
 }
 
+function chipLabel(value: unknown) {
+  const text = compact(value, "", 120)
+    .toLowerCase()
+    .replace(/[“”"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const firstClause = text.split(/[:.;]/)[0]?.trim() || text;
+  const words = firstClause
+    .replace(/[^a-z0-9 -]/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  const trailingStopWords = new Set(["a", "an", "and", "are", "for", "in", "of", "on", "the", "to", "with"]);
+  const leadingFillers = new Set(["avoid", "another", "additional", "more"]);
+
+  while (words.length > 2 && leadingFillers.has(words[0])) {
+    words.shift();
+  }
+
+  while (words.length > 2 && trailingStopWords.has(words[words.length - 1])) {
+    words.pop();
+  }
+
+  return compact(words.slice(0, 6).join(" "), "", 54);
+}
+
 function toReview(input: BoardRegenerationInput, raw: RawBoardRegenerationReview, model: string): BoardRegenerationReview {
   const seen = new Set<string>();
   const options = raw.reasons
-    .map((reason) => compact(reason, "", 40).toLowerCase())
+    .map(chipLabel)
     .filter(Boolean)
     .filter((reason) => {
       if (seen.has(reason)) return false;
@@ -130,7 +185,7 @@ export async function createRealBoardRegenerationReview(
   )).filter((item): item is { variant: BoardRegenerationVariant; imageUrl: string } => Boolean(item.imageUrl));
   const visionById = new Set(visionItems.map((item) => item.variant.id));
   const openai = createOpenAIClient();
-  const timeout = Math.max(getOpenAIGuideTimeoutMs(), 9000);
+  const timeout = Math.max(getOpenAIGuideTimeoutMs(), 20000);
 
   const payload = {
     brand: {
@@ -147,7 +202,7 @@ export async function createRealBoardRegenerationReview(
       hasVisionInput: visionById.has(variant.id)
     })),
     instruction:
-      "Act as an AI design expert reviewing a 3x3 exploration board before regenerating it. Identify what is visually weak, repetitive, off-brand, or strategically unhelpful. Return a concise summary written to the user and 4-8 short avoid-reason chips. Do not mention APIs, prompts, screenshots, models, JSON, or internal implementation."
+      "Act as an AI design expert reviewing a 3x3 exploration board before regenerating it. Identify what is visually weak, repetitive, off-brand, or strategically unhelpful. Return a concise summary written to the user and 4-8 short avoid-reason chips. Make each chip concrete, visually specific, and 2-5 words long, such as repeated warm tables, product close-up overload, weak human context, unclear bakery identity, or not enough graphic range. The chips should directly echo the same concrete issues named in the summary, with one or two adjacent alternatives allowed. Do not start chips with avoid. Avoid generic labels unless the label names what is visually repeating. Do not mention APIs, prompts, screenshots, models, JSON, or internal implementation."
   };
 
   const response = await openai.responses.create(
@@ -157,7 +212,7 @@ export async function createRealBoardRegenerationReview(
         {
           role: "system",
           content:
-            "You are the AI guide for a brand image exploration tool. You critique the current 3x3 board and suggest what to avoid before the next board is regenerated. Return JSON only."
+            "You are the AI guide for a brand image exploration tool. You critique the current 3x3 board and suggest what to avoid before the next board is regenerated. Be concrete, visual, and specific to the board. Return JSON only."
         },
         {
           role: "user",

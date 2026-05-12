@@ -41,7 +41,7 @@ export function ImageBoard({
     <div className={cn("relative", fitToViewport && "trace-board-frame grid h-full min-h-0 w-full items-start justify-items-center overflow-visible")}>
       <div
         className={cn(
-          "grid gap-[6px] bg-white",
+          "relative grid gap-[6px] bg-white",
           fitToViewport && "trace-image-board-grid",
           columns === 3 && "grid-cols-3",
           columns === 2 && "grid-cols-2",
@@ -70,10 +70,10 @@ export function ImageBoard({
             </div>
           );
         })}
+        {isLoading && outputCount === 9 ? (
+          <BoardProgressDots completedCount={completedCount} pendingCount={pendingCount} />
+        ) : null}
       </div>
-      {isLoading && outputCount === 9 ? (
-        <BoardProgressDots completedCount={completedCount} pendingCount={pendingCount} />
-      ) : null}
     </div>
   );
 }
@@ -86,7 +86,7 @@ function BoardProgressDots({
   pendingCount: number;
 }) {
   return (
-    <div className="pointer-events-none absolute bottom-2 right-2 z-30 flex items-center gap-1" aria-hidden="true">
+    <div className="trace-board-progress-dots pointer-events-none absolute right-0 top-full z-30 mt-3 flex items-center gap-1" aria-hidden="true">
       {Array.from({ length: 9 }).map((_, index) => (
         <span
           key={index}
