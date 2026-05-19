@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { AppControls } from "@/components/app/AppHeader";
+import { E2EBridge } from "@/components/app/E2EBridge";
 import { useHydrateImageCache } from "@/components/app/useHydrateImageCache";
 import { useAppShortcuts } from "@/components/app/useAppShortcuts";
 import { useRuntimeConfig } from "@/components/app/useRuntimeConfig";
@@ -18,6 +19,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { Toasts } from "@/components/Toasts";
 import { TraceCanvas } from "@/components/TraceCanvas";
 import { isCustomBakeryBrand } from "@/lib/customBakeryFixture";
+import { useTraceStore } from "@/store/useTraceStore";
 import type { BrandInput } from "@/lib/types";
 
 export function AppShell() {
@@ -36,6 +38,13 @@ export function AppShell() {
     toasts,
     actions
   } = useTraceStoreSnapshot();
+
+  // Restore the persisted trace snapshot once on the client. Deferred from
+  // module load (skipHydration) so the first client render matches the
+  // server render; useHydrateImageCache then re-attaches cached image src.
+  useEffect(() => {
+    void useTraceStore.persist.rehydrate();
+  }, []);
 
   useHydrateImageCache(nodes, actions.hydrateVariantSources);
 
@@ -148,6 +157,7 @@ export function AppShell() {
       />
 
       <main className="relative min-w-0 flex-1 overflow-hidden bg-[#ffffff]">
+        <E2EBridge />
         <GenerationController config={config} />
 
         {wizardOpen ? (

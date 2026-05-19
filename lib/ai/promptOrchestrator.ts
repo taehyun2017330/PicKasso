@@ -5,6 +5,7 @@ import type {
   PlannerOutput,
   TraceMode
 } from "@/lib/types";
+import type { ImageVariantMetadata } from "@/lib/feedback/types";
 import { compactText } from "@/lib/utils";
 
 export interface PromptBoardItem {
@@ -37,6 +38,8 @@ export type OrchestrationRecipe =
   | "split"
   | "edit"
   | "revise_goal"
+  | "regenerate"
+  | "save_direction"
   | "subsequent_exploration";
 
 const situationLabels: Record<ImagePromptSituation, string> = {
@@ -57,6 +60,8 @@ const recipeLabels: Record<OrchestrationRecipe, string> = {
   split: "Comparison paths from conflicting likes",
   edit: "Direct edit of a reference",
   revise_goal: "Re-baseline after revised goal",
+  regenerate: "Single-image regeneration of a rejected variant",
+  save_direction: "Consolidation of a saved direction",
   subsequent_exploration: "Subsequent visual exploration"
 };
 
@@ -115,7 +120,10 @@ export function resolveOrchestrationRecipe(input: PlannerInput): OrchestrationRe
   if (mode === "split") return "split";
   if (mode === "edit") return "edit";
   if (mode === "revise-goal") return "revise_goal";
+  if (mode === "regenerate") return "regenerate";
+  if (mode === "save-direction") return "save_direction";
 
+  if (input.actionMode === "regenerate") return "regenerate";
   if (input.actionMode === "converge") return "combine";
   if (input.actionMode === "custom") return "edit";
   if (input.actionMode === "narrow") return "refine";
@@ -186,6 +194,10 @@ function buildUserPromptForRecipe(input: PlannerInput, recipe: OrchestrationReci
       return buildEditPrompt(input, count);
     case "revise_goal":
       return buildReviseGoalPrompt(input, count);
+    case "regenerate":
+      return buildRegenerateSinglePrompt(input, count);
+    case "save_direction":
+      return buildSaveDirectionPrompt(input, count);
     case "subsequent_exploration":
     default:
       return buildContinuationPrompt(input, "subsequent_exploration", count);
@@ -1003,6 +1015,166 @@ function buildReviseGoalPrompt(input: PlannerInput, count: number) {
   ].join("\n");
 }
 
+function buildRegenerateSinglePrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const intent = compactText(intentFromInput(input), 600);
+  const rejected = pickAnchorVariant(input.selectedVariants);
+  const rejectedBlock = rejected ? formatAnchor(rejected) : "No specific rejected variant was provided.";
+  const warm = formatSignals(input.traceMemory.warmSignals, "warm");
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} replacement image prompt${count === 1 ? "" : "s"} for a single variant the user rejected in place.`,
+    "",
+    "The user did not ask to widen or refine the whole board. They want this one cell redone so it works where it currently does not.",
+    "",
+    "This is not a fresh exploration sweep.",
+    "This is not a refinement set around a liked anchor.",
+    "This is a same-slot redo: keep the variant's role in the board, fix what made this specific image fail.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "USER INTENT",
+    intent,
+    "",
+    "REJECTED VARIANT (the cell being replaced)",
+    rejectedBlock,
+    "",
+    "WARM TRAITS TO KEEP AVAILABLE",
+    warm,
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompt${count === 1 ? "" : "s"} that:`,
+    "- Keep the rejected variant's intended role on the board (its subject purpose and slot), not its failed execution.",
+    "- Diagnose what specifically made this image fail and fix exactly that.",
+    "- Do not drift into a different direction the rest of the board is not exploring.",
+    "- Do not simply make the image generically safer.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. Identify the failed variant's intended contribution to the board.",
+    "2. Separate the failure (what to fix) from the intent (what to keep).",
+    count === 1
+      ? "3. Commit to the single strongest fix rather than hedging."
+      : "3. Plan distinct fixes so the options are genuinely different recovery attempts, not near-duplicates.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "If the slot has no readable text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} object${count === 1 ? "" : "s"}.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "\"description\" should be one short sentence stating what failed and how this replacement fixes it.",
+    "",
+    "Before returning, do one final check:",
+    "If the replacement repeats the original failure, revise.",
+    "If it abandons the variant's role on the board, revise."
+  ].join("\n");
+}
+
+function buildSaveDirectionPrompt(input: PlannerInput, count: number) {
+  const brand = input.brand;
+  const intent = compactText(intentFromInput(input), 600);
+  const anchor = pickAnchorVariant(input.selectedVariants);
+  const anchorBlock = anchor ? formatAnchor(anchor) : "No anchor variant was provided. Use the warm signals below as the closest substitute.";
+  const warm = formatSignals(input.traceMemory.warmSignals, "warm");
+  const cold = formatSignals(input.traceMemory.coldSignals, "cold");
+
+  return [
+    "You are a generative visual exploration director and prompt orchestrator.",
+    "",
+    `Your task is to write ${count} image prompt${count === 1 ? "" : "s"} that consolidate a direction the user has explicitly saved as their preferred one.`,
+    "",
+    "The exploration has converged. The user repeatedly approved this direction and chose to lock it in. This is the highest-confidence signal in the session.",
+    "",
+    "This is not exploration.",
+    "This is not a sibling-variation set.",
+    "This is a clean, definitive rendering of the agreed direction: the canonical version of what the user committed to.",
+    "",
+    "INPUTS",
+    `- Brand name: ${brand?.name || "Unnamed brand"}`,
+    `- Category: ${brand?.category || "open visual exploration"}`,
+    `- Target audience: ${brand?.targetAudience || "unspecified audience"}`,
+    `- Goal: ${brand?.goal || "visual exploration"}`,
+    "",
+    "USER INTENT",
+    intent,
+    "",
+    "SAVED DIRECTION (the locked anchor)",
+    anchorBlock,
+    "",
+    "WARM TRAITS THAT DEFINE THIS DIRECTION",
+    warm,
+    "",
+    "COLD TRAITS TO AVOID",
+    cold,
+    "",
+    "OBJECTIVE",
+    `Generate ${count} image prompt${count === 1 ? "" : "s"} that:`,
+    "- Render the saved direction as cleanly and confidently as possible.",
+    "- Preserve every load-bearing trait of the anchor exactly; do not reinterpret it.",
+    count === 1
+      ? "- Produce the single strongest canonical rendering, not a variation."
+      : "- Vary only in incidental production detail, never in the direction itself.",
+    "- Resolve any leftover weakness from the anchor without changing its identity.",
+    "",
+    "CREATIVE METHOD",
+    "Before writing prompts, privately do this:",
+    "",
+    "1. Name the load-bearing traits that make this the saved direction.",
+    "2. Identify any residual flaw worth cleaning up without altering identity.",
+    "3. Commit to the definitive rendering.",
+    "",
+    "Do not output this planning. Only output the final prompts.",
+    "",
+    "PROMPT STYLE",
+    "Each image prompt must be compact, vivid, and ready to send to an image model.",
+    "",
+    "Use this structure:",
+    "",
+    "[T] 1:1 {specific visual form} for {brand_name}. {visual description}. {layout or composition}. {exact readable text if any}. {aesthetic direction}. {important exclusions}.",
+    "",
+    "If the saved direction has no readable text, say \"No headline text.\"",
+    "",
+    "OUTPUT FORMAT",
+    `Return JSON object with key "prompts"; its value must contain exactly ${count} object${count === 1 ? "" : "s"}.`,
+    "",
+    "Each object must include only:",
+    "- \"name\"",
+    "- \"description\"",
+    "- \"prompt_for_image_model\"",
+    "",
+    "\"description\" should be one short sentence stating that this is the consolidated saved direction and what defines it.",
+    "",
+    "Before returning, do one final check:",
+    "If any prompt reinterprets or drifts from the saved direction, revise.",
+    "If any prompt reads as fresh exploration rather than consolidation, revise."
+  ].join("\n");
+}
+
 function buildContinuationPrompt(
   input: PlannerInput,
   situation: ImagePromptSituation,
@@ -1083,16 +1255,30 @@ function pickAnchorVariant(variants: PlannerInput["selectedVariants"]) {
   return liked ?? variants[0];
 }
 
+function formatVariantMetadata(metadata?: ImageVariantMetadata) {
+  if (!metadata) return null;
+  const parts = [
+    metadata.visualSummary ? `looks like ${compactText(metadata.visualSummary, 150)}` : null,
+    metadata.subjects?.length ? `subjects ${metadata.subjects.slice(0, 4).join(", ")}` : null,
+    metadata.style?.length ? `style ${metadata.style.slice(0, 4).join(", ")}` : null,
+    metadata.palette?.length ? `palette ${metadata.palette.slice(0, 4).join(", ")}` : null,
+    metadata.composition?.length ? `composition ${metadata.composition.slice(0, 3).join(", ")}` : null,
+    metadata.brandFitRisks?.length ? `risks ${metadata.brandFitRisks.slice(0, 3).join(", ")}` : null
+  ].filter(Boolean);
+  return parts.length ? parts.join("; ") : null;
+}
+
 function formatAnchor(variant: PlannerInput["selectedVariants"][number]) {
   return [
     `Label: ${variant.styleLabel || "Anchor"}`,
     `Prompt: ${compactText(variant.prompt, 280)}`,
+    formatVariantMetadata(variant.metadata) ? `Image read: ${formatVariantMetadata(variant.metadata)}` : null,
     variant.feedback?.rating ? `Signal: ${variant.feedback.rating}` : null,
     variant.feedback?.reasonChips?.length ? `Reasons: ${variant.feedback.reasonChips.join(", ")}` : null,
     variant.feedback?.note ? `Note: ${compactText(variant.feedback.note, 180)}` : null
   ]
     .filter(Boolean)
-    .join(" | ");
+    .join("\n");
 }
 
 function formatBoardSnapshot(variants: PlannerInput["selectedVariants"], limit: number) {
@@ -1103,6 +1289,7 @@ function formatBoardSnapshot(variants: PlannerInput["selectedVariants"], limit: 
       [
         `${index + 1}. ${variant.styleLabel || `Image ${index + 1}`}`,
         `Prompt: ${compactText(variant.prompt, 220)}`,
+        formatVariantMetadata(variant.metadata) ? `Image read: ${formatVariantMetadata(variant.metadata)}` : null,
         variant.feedback?.rating ? `Signal: ${variant.feedback.rating}` : null,
         variant.feedback?.reasonChips?.length ? `Reasons: ${variant.feedback.reasonChips.join(", ")}` : null,
         variant.feedback?.note ? `Note: ${compactText(variant.feedback.note, 140)}` : null
@@ -1138,6 +1325,10 @@ function nodeTitleForRecipe(recipe: OrchestrationRecipe) {
       return "Custom Steer";
     case "revise_goal":
       return "Re-Baselined Directions";
+    case "regenerate":
+      return "Regenerated Cell";
+    case "save_direction":
+      return "Saved Direction";
     case "subsequent_exploration":
     default:
       return "Next Directions";
@@ -1161,6 +1352,8 @@ function divergenceForRecipe(
       return index < Math.ceil(count / 2) ? "narrow" : "medium";
     case "correct":
     case "edit":
+    case "regenerate":
+    case "save_direction":
       return "narrow";
     case "combine":
       return index < 2 ? "medium" : "narrow";

@@ -236,6 +236,54 @@ const reviseGoalRequest = buildPromptOrchestratorRequest(reviseGoalInput);
 assert.match(reviseGoalRequest.user, /REVISED INTENT FROM USER/);
 assert.match(reviseGoalRequest.user, /re-baseline/i);
 
+const regenerateSingleInput: PlannerInput = {
+  ...refineInput,
+  actionMode: "regenerate",
+  outputCount: 1,
+  originatingDecision: decisionWithMode("regenerate", "Redo this rejected cell so it works in its slot.")
+};
+assert.equal(resolveOrchestrationRecipe(regenerateSingleInput), "regenerate");
+const regenerateSingleRequest = buildPromptOrchestratorRequest(regenerateSingleInput);
+assert.equal(regenerateSingleRequest.recipe, "regenerate");
+assert.match(regenerateSingleRequest.user, /REJECTED VARIANT \(the cell being replaced\)/);
+assert.match(regenerateSingleRequest.user, /same-slot redo/i);
+assert.match(regenerateSingleRequest.user, /exactly 1 object\b/);
+
+const saveDirectionInput: PlannerInput = {
+  ...refineInput,
+  actionMode: "narrow",
+  outputCount: 1,
+  originatingDecision: decisionWithMode("save-direction", "Lock in the approved morning pastry direction.")
+};
+assert.equal(resolveOrchestrationRecipe(saveDirectionInput), "save_direction");
+const saveDirectionRequest = buildPromptOrchestratorRequest(saveDirectionInput);
+assert.equal(saveDirectionRequest.recipe, "save_direction");
+assert.match(saveDirectionRequest.user, /SAVED DIRECTION \(the locked anchor\)/);
+assert.match(saveDirectionRequest.user, /highest-confidence signal/i);
+
+// A liked anchor that carries inferred image metadata should surface an
+// "Image read" line so recipes steer on the rendered image, not just the prompt.
+const anchorWithMetadata: PlannerInput["selectedVariants"][number] = {
+  ...likedAnchor,
+  metadata: {
+    visualSummary: "matte croissant on linen in soft morning light",
+    subjects: ["croissant", "linen cloth"],
+    style: ["matte", "editorial"],
+    palette: ["warm cream", "amber"],
+    composition: ["centered hero"],
+    brandFitStrengths: ["artisanal warmth"],
+    brandFitRisks: ["reads slightly generic"]
+  }
+};
+const refineWithMetadata: PlannerInput = {
+  ...refineInput,
+  selectedVariants: [anchorWithMetadata]
+};
+const refineWithMetadataRequest = buildPromptOrchestratorRequest(refineWithMetadata);
+assert.match(refineWithMetadataRequest.user, /Image read:/);
+assert.match(refineWithMetadataRequest.user, /palette warm cream, amber/);
+assert.match(refineWithMetadataRequest.user, /risks reads slightly generic/);
+
 // First-generation should still take priority over any decision.mode hint.
 const firstGenWithDecision: PlannerInput = {
   ...plannerInput,

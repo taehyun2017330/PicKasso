@@ -9,3 +9,6 @@ yarn-debug.log*
 yarn-error.log*
 *.tsbuildinfo
 .DS_Store
+playwright-report
+test-results
+.playwright

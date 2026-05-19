@@ -1,20 +1,11 @@
-import { summarizeTraceMemory } from "@/lib/ai/traceMemory";
 import { resolveImagePromptSituation } from "@/lib/ai/promptOrchestrator";
-import type { ImageVariant, NextGenerationDecision, RuntimeConfig } from "@/lib/types";
-import { compactText, findVariant } from "@/lib/utils";
+import type { ImageVariant, RuntimeConfig } from "@/lib/types";
+import { findVariant } from "@/lib/utils";
+import { buildPlannerInput } from "@/components/generation/buildPlannerInput";
 import { runVariant } from "@/components/generation/runVariant";
 import { ensureTask, cancelHandles, isNodeStopped } from "@/components/generation/taskRegistry";
 import type { NodeTaskMapRef } from "@/components/generation/types";
 import { useTraceStore } from "@/store/useTraceStore";
-
-function compactPlanningVariant(variant: ImageVariant): ImageVariant {
-  return {
-    ...variant,
-    src: "",
-    prompt: compactText(variant.prompt, 700),
-    error: undefined
-  };
-}
 
 export async function runNode(
   nodeId: string,
@@ -31,38 +22,12 @@ export async function runNode(
     if (!node || node.attempt !== attempt || isNodeStopped(node)) return;
 
     if (!node.variants.length) {
-      const thread = state.threads.find((item) => item.id === node.threadId) ?? null;
-      const brand = thread ? state.brands.find((item) => item.id === thread.brandId) ?? null : null;
-      const threadNodes = Object.values(state.nodes).filter((item) => item.threadId === node.threadId);
-      const selectedVariants = node.parentVariantIds
-        .map((variantId) => findVariant(state.nodes, variantId))
-        .filter((variant): variant is ImageVariant => Boolean(variant));
-      const planningVariants = selectedVariants.map(compactPlanningVariant);
-      const traceMemory = summarizeTraceMemory({
-        brand,
-        thread,
-        nodes: threadNodes,
-        selectedVariants: planningVariants
-      });
-      const originatingDecision = node.parentNodeIds
-        .map((parentId) => state.nodes[parentId]?.decision)
-        .find((decision): decision is NextGenerationDecision => Boolean(decision));
+      const plannerInput = buildPlannerInput(state, node, config);
 
       const response = await fetch("/api/trace/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          brand,
-          traceMemory,
-          actionMode: node.mode,
-          selectedVariants: planningVariants,
-          userPrompt: node.userPrompt,
-          seed: `${node.id}:${node.attempt}`,
-          nodeDepth: node.depth,
-          outputCount: node.outputCount ?? 4,
-          runtimeConfig: config,
-          originatingDecision
-        })
+        body: JSON.stringify(plannerInput)
       });
 
       if (!response.ok) {
