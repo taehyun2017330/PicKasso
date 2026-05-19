@@ -472,14 +472,15 @@ function buildRefinePrompt(input: PlannerInput, count: number) {
     "",
     "COLD TRAITS TO AVOID",
     cold,
+    ...formatHardExclusions(input),
     "",
     "OBJECTIVE",
     `Generate ${count} image prompts that:`,
-    "- Stay close to the anchor's visual core (medium, palette, mood, composition system, subject role).",
-    "- Vary in non-core dimensions: specific subject moment, framing, time of day, micro-styling, supporting detail.",
+    "- Treat the user reaction and USER INTENT as authoritative. The anchor is a starting point, not a constraint: where they conflict, follow the user — including changing medium, palette, lighting, or subject.",
+    "- Preserve the anchor traits the user did NOT ask to change; vary non-core dimensions: framing, micro-styling, supporting detail.",
     "- Amplify the warm traits where it makes sense, not just maintain them.",
     "- Remove any cold traits that have been recurring.",
-    "- Do not drift into a different aesthetic family.",
+    "- Do not drift into a different aesthetic family UNLESS the user intent calls for it (e.g. painting → photograph); then move there decisively and consistently across every prompt.",
     "",
     "CREATIVE METHOD",
     "Before writing prompts, privately do this:",
@@ -555,6 +556,7 @@ function buildCorrectPrompt(input: PlannerInput, count: number) {
     "",
     "COLD TRAITS TO AVOID",
     cold,
+    ...formatHardExclusions(input),
     "",
     "OBJECTIVE",
     `Generate ${count} image prompts that:`,
@@ -885,6 +887,7 @@ function buildEditPrompt(input: PlannerInput, count: number) {
     "",
     "COLD TRAITS TO AVOID",
     cold,
+    ...formatHardExclusions(input),
     "",
     "OBJECTIVE",
     `Generate ${count} image prompts that:`,
@@ -1051,6 +1054,7 @@ function buildRegenerateSinglePrompt(input: PlannerInput, count: number) {
     "",
     "COLD TRAITS TO AVOID",
     cold,
+    ...formatHardExclusions(input),
     "",
     "OBJECTIVE",
     `Generate ${count} image prompt${count === 1 ? "" : "s"} that:`,
@@ -1131,6 +1135,7 @@ function buildSaveDirectionPrompt(input: PlannerInput, count: number) {
     "",
     "COLD TRAITS TO AVOID",
     cold,
+    ...formatHardExclusions(input),
     "",
     "OBJECTIVE",
     `Generate ${count} image prompt${count === 1 ? "" : "s"} that:`,
@@ -1269,13 +1274,29 @@ function formatVariantMetadata(metadata?: ImageVariantMetadata) {
 }
 
 function formatAnchor(variant: PlannerInput["selectedVariants"][number]) {
+  const meta = formatVariantMetadata(variant.metadata);
+  const reaction = variant.feedback
+    ? [
+        `Signal: ${variant.feedback.rating}`,
+        variant.feedback.reasonChips?.length ? `Reasons: ${variant.feedback.reasonChips.join(", ")}` : null,
+        variant.feedback.note ? `Note: ${compactText(variant.feedback.note, 200)}` : null
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : null;
+
   return [
     `Label: ${variant.styleLabel || "Anchor"}`,
+    // The user judged the rendered image, not the text below. When the
+    // original generation text and the reaction disagree, the reaction is
+    // the ground truth — state that explicitly so the model does not average
+    // a stale "warm/lifestyle" prompt against a "matte/no-people" reaction.
+    reaction
+      ? `WHAT THE USER ACTUALLY RESPONDED TO (authoritative — overrides the original text below on any conflict):\n${reaction}`
+      : null,
+    "Original generation text (a starting point only; defer to the reaction above where they conflict):",
     `Prompt: ${compactText(variant.prompt, 280)}`,
-    formatVariantMetadata(variant.metadata) ? `Image read: ${formatVariantMetadata(variant.metadata)}` : null,
-    variant.feedback?.rating ? `Signal: ${variant.feedback.rating}` : null,
-    variant.feedback?.reasonChips?.length ? `Reasons: ${variant.feedback.reasonChips.join(", ")}` : null,
-    variant.feedback?.note ? `Note: ${compactText(variant.feedback.note, 180)}` : null
+    meta ? `Image read: ${meta}` : null
   ]
     .filter(Boolean)
     .join("\n");
@@ -1303,6 +1324,46 @@ function formatBoardSnapshot(variants: PlannerInput["selectedVariants"], limit: 
 function formatSignals(signals: string[], kind: "warm" | "cold") {
   if (!signals.length) return kind === "warm" ? "No warm signals yet." : "No cold signals yet.";
   return signals.slice(-6).map((signal, index) => `${index + 1}. ${signal}`).join("\n");
+}
+
+/**
+ * Pulls the non-negotiable visual exclusions out of the steering signal:
+ * the cold reason-chips plus any "no / without / avoid" phrasing the user
+ * wrote. Real runs showed negatives ("no people") silently reappearing
+ * because they only lived in prose; these get promoted to a hard list every
+ * prompt must echo in its exclusions slot.
+ */
+function hardExclusions(input: PlannerInput): string[] {
+  const out = new Set<string>();
+
+  for (const signal of input.traceMemory.coldSignals) {
+    const chips = signal.split(" — ")[0];
+    for (const chip of chips.split(",")) {
+      const trimmed = chip.trim().toLowerCase();
+      if (trimmed.length >= 3 && trimmed.length <= 40) out.add(trimmed);
+    }
+  }
+
+  const prose = `${intentFromInput(input)} ${input.userPrompt ?? ""}`;
+  const negativeRe = /\b(?:no|without|avoid|exclude|never)\s+([a-z][a-z\- ]{2,32}?)(?=[.,;]|\band\b|\bbut\b|$)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = negativeRe.exec(prose)) !== null) {
+    const phrase = match[1].trim().toLowerCase().replace(/\s+/g, " ");
+    if (phrase.length >= 3 && phrase.length <= 40) out.add(phrase);
+  }
+
+  return [...out].slice(0, 12);
+}
+
+function formatHardExclusions(input: PlannerInput): string[] {
+  const items = hardExclusions(input);
+  if (!items.length) return [];
+  return [
+    "",
+    "NON-NEGOTIABLE EXCLUSIONS",
+    "Every prompt's {important exclusions} slot MUST explicitly exclude all of these. Treat them as hard constraints, not soft preferences. If any prompt would contain one of these, rewrite it:",
+    items.map((item) => `- no ${item}`).join("\n")
+  ];
 }
 
 function nodeTitleForRecipe(recipe: OrchestrationRecipe) {

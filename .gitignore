@@ -12,3 +12,18 @@ yarn-error.log*
 playwright-report
 test-results
 .playwright
+
+# Generated experiment artifacts (real images, ~1GB). Reproducible via the
+# e2e specs + qa-runs/build-showcase.mjs — never commit these. Source/scripts
+# and the findings doc below stay tracked.
+qa-runs/**/*.png
+qa-runs/**/*.jpg
+qa-runs/**/*.jpeg
+qa-runs/*.log
+qa-runs/fonts/
+qa-runs/real-exp/campaign/
+qa-runs/real-exp/diverse/
+qa-runs/real-exp/_v2_archive/
+qa-runs/real-exp/turn-0-board/
+qa-runs/real-exp/turn-1/
+qa-runs/real-exp/showcase/

@@ -20,6 +20,9 @@ declare global {
       reset: () => void;
       plannerInputForNode: (nodeId: string) => PlannerInput | null;
       recipeForNode: (nodeId: string) => OrchestrationRecipe | null;
+      orchestratorPromptForNode: (
+        nodeId: string
+      ) => { situation: string; recipe: OrchestrationRecipe; user: string } | null;
     };
   }
 }

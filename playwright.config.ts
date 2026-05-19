@@ -9,6 +9,7 @@ const BASE_URL = `http://localhost:${PORT}`;
  */
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: /real-(experiment|campaign|diverse)\.spec\.ts/,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

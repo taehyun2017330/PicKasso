@@ -96,28 +96,62 @@ export class AppDriver {
     );
   }
 
-  /** Waits until a node's board has finished generating in mock mode. */
-  async waitForBoard(nodeId: string) {
+  /** Waits until a node's board has finished generating. */
+  async waitForBoard(nodeId: string, timeoutMs = 45_000) {
     await this.page.waitForFunction(
       (id) => {
         const node = window.__pickasso!.store.getState().nodes[id];
-        return Boolean(node) && node.status === "done" && node.variants.length > 0;
+        if (!node) return false;
+        if (node.status === "error") throw new Error(`Node ${id} errored: ${node.error}`);
+        return node.status === "done" && node.variants.length > 0;
       },
       nodeId,
-      { timeout: 45_000 }
+      { timeout: timeoutMs }
     );
   }
 
-  async react(variantId: string, rating: "like" | "dislike" | "skip", note = "") {
+  /** Full variant detail incl. image src — for saving real images to disk. */
+  async variants(
+    nodeId: string
+  ): Promise<Array<{ id: string; styleLabel: string; prompt: string; src: string; status: string }>> {
+    return this.page.evaluate((id) => {
+      const node = window.__pickasso!.store.getState().nodes[id];
+      return (node?.variants ?? []).map((v) => ({
+        id: v.id,
+        styleLabel: v.styleLabel,
+        prompt: v.prompt,
+        src: v.src,
+        status: v.status ?? "unknown"
+      }));
+    }, nodeId);
+  }
+
+  async react(
+    variantId: string,
+    rating: "like" | "dislike" | "skip",
+    note = "",
+    reasonChips: string[] = []
+  ) {
     await this.page.evaluate(
-      ({ variantId, rating, note }) =>
+      ({ variantId, rating, note, reasonChips }) =>
         window.__pickasso!.store.getState().addFeedback(variantId, {
           rating,
-          reasonChips: [],
+          reasonChips,
           note
         }),
-      { variantId, rating, note }
+      { variantId, rating, note, reasonChips }
     );
+  }
+
+  async orchestratorPrompt(
+    nodeId: string
+  ): Promise<{ situation: string; recipe: string; user: string }> {
+    const result = await this.page.evaluate(
+      (id) => window.__pickasso!.orchestratorPromptForNode(id),
+      nodeId
+    );
+    if (!result) throw new Error(`No orchestrator prompt for node ${nodeId}`);
+    return result;
   }
 
   /** Records a decision on a node and forks a child that consumes it. */

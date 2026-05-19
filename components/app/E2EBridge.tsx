@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 import { buildPlannerInput } from "@/components/generation/buildPlannerInput";
-import { resolveOrchestrationRecipe } from "@/lib/ai/promptOrchestrator";
+import { buildPromptOrchestratorRequest, resolveOrchestrationRecipe } from "@/lib/ai/promptOrchestrator";
 import { useTraceStore } from "@/store/useTraceStore";
 
 /**
@@ -30,6 +30,14 @@ export function E2EBridge() {
         const state = useTraceStore.getState();
         const node = state.nodes[nodeId];
         return node ? resolveOrchestrationRecipe(buildPlannerInput(state, node)) : null;
+      },
+      // The real image-model steering instruction for this node.
+      orchestratorPromptForNode: (nodeId: string) => {
+        const state = useTraceStore.getState();
+        const node = state.nodes[nodeId];
+        if (!node) return null;
+        const request = buildPromptOrchestratorRequest(buildPlannerInput(state, node));
+        return { situation: request.situation, recipe: request.recipe, user: request.user };
       }
     };
 

@@ -1,0 +1,97 @@
+{
+  "parentNodeId": "node_pe25v_nbmuay",
+  "turn": 1,
+  "reactions": [
+    {
+      "variantId": "variant_pebf9_z0obgb",
+      "rating": "like",
+      "note": "This quiet matte editorial mood is exactly right — no people, no gloss. But I want it PHOTOGRAPHIC not painted, in COLD north-window daylight, and the subject should be a single hand-torn CROISSANT on RAW LINEN, muted oat and cream palette.",
+      "chips": [
+        "matte editorial",
+        "cold north-window light",
+        "no people",
+        "hand-torn croissant",
+        "raw linen",
+        "oat-cream palette",
+        "photographic not painted"
+      ]
+    },
+    {
+      "variantId": "variant_pebf9_zavbbb",
+      "rating": "dislike",
+      "note": "Glossy 3D product render floating on a pedestal — too commercial and slick.",
+      "chips": [
+        "glossy",
+        "3D product render",
+        "commercial product-shot",
+        "levitating product"
+      ]
+    },
+    {
+      "variantId": "variant_pebf9_sfs64z",
+      "rating": "dislike",
+      "note": "Flat bold graphic poster with big headline text.",
+      "chips": [
+        "graphic poster",
+        "headline text",
+        "flat vector"
+      ]
+    },
+    {
+      "variantId": "variant_pebf9_17nkql",
+      "rating": "dislike",
+      "note": "Loud orange ingredient illustration with text.",
+      "chips": [
+        "illustration",
+        "loud color",
+        "text-heavy"
+      ]
+    },
+    {
+      "variantId": "variant_pebf9_s1ixyc",
+      "rating": "dislike",
+      "note": "Warm glossy cluttered wood flat-lay, commercial and busy.",
+      "chips": [
+        "warm tone",
+        "glossy",
+        "cluttered",
+        "commercial"
+      ]
+    },
+    {
+      "variantId": "variant_pebf9_9rkbrv",
+      "rating": "dislike",
+      "note": "Retro lino-print poster, graphic and text-driven.",
+      "chips": [
+        "graphic poster",
+        "retro print",
+        "text-heavy"
+      ]
+    },
+    {
+      "variantId": "variant_pebf9_poojx0",
+      "rating": "dislike",
+      "note": "Watercolor sketch with a coffee cup — illustrative and staged.",
+      "chips": [
+        "illustration",
+        "watercolor",
+        "coffee staging"
+      ]
+    },
+    {
+      "variantId": "variant_pebf9_bp1dwk",
+      "rating": "skip"
+    },
+    {
+      "variantId": "variant_pebf9_y0bouv",
+      "rating": "skip"
+    }
+  ],
+  "decision": {
+    "mode": "refine",
+    "nextOutputCount": 4,
+    "promptIntent": "Refine toward a quiet matte editorial PHOTOGRAPH of a single hand-torn croissant on raw linen in cold north-window daylight; muted oat/cream palette; no people, no gloss, no text. Keep the calm craft-led mood of the liked image but make it photographic and cold-lit, not a warm painting, and a croissant rather than a bread loaf.",
+    "memoryUpdate": "Liked the quiet matte editorial mood; correcting from warm painting/bread to cold-lit photographic hand-torn croissant on raw linen."
+  },
+  "childMode": "narrow"
+}

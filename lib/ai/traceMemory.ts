@@ -69,16 +69,16 @@ export function summarizeTraceMemory({
     for (const prompt of node.generatedPrompts) promptHistory.push(compactText(prompt, 96));
     for (const variant of node.variants) {
       if (!variant.feedback) continue;
-      const signal = [
-        variant.styleLabel,
-        variant.feedback.reasonChips.join(", "),
-        variant.feedback.note
-      ]
+      // Lead with the reason chips and the user's note — the actual trait
+      // signal — so it survives truncation. The variant label (often a
+      // generated name, low steering value) is demoted to a trailing tag.
+      const trait = variant.feedback.reasonChips.join(", ");
+      const signal = [trait, variant.feedback.note, variant.styleLabel ? `(${variant.styleLabel})` : null]
         .filter(Boolean)
-        .join(": ");
+        .join(" — ");
 
-      if (variant.feedback.rating === "like") warmSignals.push(compactText(signal, 90));
-      if (variant.feedback.rating === "dislike") coldSignals.push(compactText(signal, 90));
+      if (variant.feedback.rating === "like") warmSignals.push(compactText(signal, 150));
+      if (variant.feedback.rating === "dislike") coldSignals.push(compactText(signal, 150));
     }
   }
 

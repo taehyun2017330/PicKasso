@@ -39,6 +39,16 @@ const modelRoutes: Record<AiModelTask, AiModelRoute> = {
   }
 };
 
+// Optional env overrides. Defaults above are unchanged unless these are set,
+// so normal/mock runs are unaffected. Used to point at real model IDs when
+// exercising the live OpenAI pipeline.
+const modelEnvOverrides: Partial<Record<AiModelTask, string | undefined>> = {
+  promptOrchestrator: process.env.OPENAI_ORCHESTRATOR_MODEL,
+  imageGeneration: process.env.OPENAI_IMAGE_MODEL
+};
+
 export function getAiModelRoute(task: AiModelTask): AiModelRoute {
-  return modelRoutes[task];
+  const route = modelRoutes[task];
+  const override = modelEnvOverrides[task]?.trim();
+  return override ? { ...route, model: override } : route;
 }

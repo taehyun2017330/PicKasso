@@ -12,7 +12,10 @@ function brandBrief(brand: Brand | null, fallbackCategory: string) {
   }
 
   return [
-    `Brand: ${brand.name}`,
+    // The name is semantic context only (tone, origin) — never something to
+    // depict. Image models stamp a supplied brand name onto the product as
+    // text; this line prevents that without losing the naming context.
+    `Brand (internal context only — do NOT render this name, or any lettering/logo, in the image): ${brand.name}`,
     `Category: ${brand.category}`,
     `Primary business/creative goal: ${brand.goal}`,
     `Target audience: ${brand.targetAudience}`
@@ -48,7 +51,7 @@ function socialMediaRules() {
     "Role: Act as a senior social media content strategist and visual creative director.",
     "Goal: produce brand-owner-ready social media image directions that can work as premium Instagram, TikTok cover, paid social, launch, or campaign concept art.",
     "Composition: square 1:1 image, one full-bleed scene or one complete graphic composition, strong thumb-stopping focal point, clear visual hierarchy, polished art direction, not a generic stock photo.",
-    "Text: avoid readable copy unless explicitly requested; if text is needed, leave clean negative space for later design/layout.",
+    "Text: by default render NO text at all — no brand name, product name, lettering, signage, captions, labels, watermarks, or typography anywhere in the image, including on the product itself. Only include text if the image prompt explicitly asks for specific readable copy; otherwise leave clean negative space for later design/layout.",
     "Brand safety: do not use real logos, trademarks, UI from existing brands, or OpenAI marks.",
     "Output: one finished image asset only. Never create a contact sheet, collage, 2x2 grid, four-panel layout, split-screen comparison, labels, captions, or UI frame inside the image."
   ].join("\n");
